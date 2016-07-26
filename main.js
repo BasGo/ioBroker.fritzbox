@@ -1188,6 +1188,36 @@ function setWlanEnabled(host, user, password, enabled) {
     });
 }
 
+function analyzePhonebook(phonebook) {
+    var phonenumbers = [];
+    var phonebook = result.phonebooks.phonebook[0];
+    for (var c = 0; c <= phonebook.contact.length; c++) {
+        var contact = phonebook.contact[c];
+        if (typeof contact != 'undefined') {
+            var entryName = contact.person[0].realName[0];
+            for (var t = 0; t <= contact.telephony.length; t++) {
+                var telephony = contact.telephony[t];
+                if (typeof telephony != 'undefined') {
+                    for (var n = 0; n <= telephony.number.length; n++) {
+                        var number = telephony.number[n];
+                        if (typeof number != 'undefined') {
+                            if (number._.startsWith('0') || number._.startsWith('+')) {
+                                phonenumbers.push({
+                                    key: number._,
+                                    value: { name: entryName, type: number.$.type }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    adapter.setState('phonebook.tableJSON', JSON.stringify(phonenumbers), true);
+    adapter.log.debug("TR-064: Successfully analyzed phonebook results, got " + phonenumbers.length + " entries");
+}
+
 function getPhonebook(host, user, password) {
     connectToTR064(host, user, password, function (sslDev) {
         var tel = sslDev.services["urn:dslforum-org:service:X_AVM-DE_OnTel:1"];
@@ -1199,45 +1229,21 @@ function getPhonebook(host, user, password) {
                 var url = ret.NewPhonebookURL;
                 adapter.log.debug("TR-064: Got phonebook uri: " + url);
                 request(url, function (error, response, body) {
-                    if (!error && response.statusCode == 200) {
+                    if (error) {
+                        adapter.log.error("TR-064: Error while requesting phonebook content: " + err);
+                    } else if (response.statusCode == 200) {
                         adapter.log.debug("TR-064: Got valid phonebook content from, starting to parse ...");
                         var parser = new xml2js.Parser();
-                        parser.parseString(body, function (err, result) {
+                        parser.parseString(body, function(err, result) {
                             if (err) {
                                 adapter.log.warn("TR-064: Error while parsing phonebook content: " + err);
                             } else {
                                 adapter.log.debug("TR-064: Successfully parsed phonebook content, analyzing result ...");
-                                var phonenumbers = []; // create an empty array for fetching all configured phone numbers from fritzbox
-                                var phonebook = result.phonebooks.phonebook[0];
-                                for (var c = 0; c <= phonebook.contact.length; c++) {
-                                    var contact = phonebook.contact[c];
-                                    if (typeof contact != 'undefined') {
-                                        var entryName = contact.person[0].realName[0];
-                                        for (var t = 0; t <= contact.telephony.length; t++) {
-                                            var telephony = contact.telephony[t];
-                                            if (typeof telephony != 'undefined') {
-                                                for (var n = 0; n <= telephony.number.length; n++) {
-                                                    var number = telephony.number[n];
-                                                    if (typeof number != 'undefined') {
-                                                        var entryNumber = number._;
-                                                        var entryType = number.$.type;
-                                                        if (entryNumber.startsWith('0') || entryNumber.startsWith('+')) {
-                                                            phonenumbers.push({
-                                                                key: entryNumber,
-                                                                value: { name: entryName, type: entryType }
-                                                            });
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                adapter.setState('phonebook.tableJSON', JSON.stringify(phonenumbers), true);
-                                adapter.log.debug("TR-064: Successfully analyzed phonebook results");
+                                analyzePhonebook(result);
                             }
                         });
+                    } else {
+                        adapter.log.warn("TR-064: Received unknown state while requesting phonebook: " + JSON.stringify(response) + ", " + JSON.stringify(body));
                     }
                 });
             }
